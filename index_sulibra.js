@@ -548,7 +548,22 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         try {
-            await interaction.message.edit({ components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close-ticket:' + ticketNumber + ':' + ownerId + ':' + claimant.id).setLabel('إغلاق التذكرة').setStyle(ButtonStyle.Danger).setEmoji('🔒'))] });
+            const updatedTicketEmbed = interaction.message.embeds[0]
+                ? EmbedBuilder.from(interaction.message.embeds[0])
+                : new EmbedBuilder();
+            const updatedFields = (interaction.message.embeds[0]?.fields || []).map(field =>
+                field.name === 'الحالة'
+                    ? { name: 'الحالة', value: 'مستلمة بواسطة <@' + claimant.id + '>', inline: field.inline ?? true }
+                    : { name: field.name, value: field.value, inline: field.inline ?? false }
+            );
+            updatedTicketEmbed
+                .setFields(updatedFields)
+                .setColor(0x57F287);
+
+            await interaction.message.edit({
+                embeds: [updatedTicketEmbed],
+                components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close-ticket:' + ticketNumber + ':' + ownerId + ':' + claimant.id).setLabel('إغلاق التذكرة').setStyle(ButtonStyle.Danger).setEmoji('🔒'))]
+            });
 
             const claimCfg = loadGuildConfig(guildId);
             if (!claimCfg.claims) claimCfg.claims = {};
