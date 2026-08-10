@@ -181,9 +181,9 @@ client.on('interactionCreate', async (interaction) => {
                 .setCustomId('ticket-menu')
                 .setPlaceholder('اختر نوع طلبك...')
                 .addOptions([
-                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
                     { label: 'الدعم الفني', value: 'technical', emoji: '🎧' },
                     { label: 'استفسار', value: 'inquiry', emoji: '💬' },
+                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
                 ]);
 
             const row = new ActionRowBuilder().addComponents(menu);
@@ -236,9 +236,9 @@ client.on('interactionCreate', async (interaction) => {
                 .setCustomId('setup-category-select')
                 .setPlaceholder('اختر قسماً...')
                 .addOptions([
-                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
                     { label: 'الدعم الفني', value: 'technical', emoji: '🎧' },
                     { label: 'استفسار', value: 'inquiry', emoji: '💬' },
+                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
                 ]);
             await interaction.reply({
                 embeds: [new EmbedBuilder().setTitle('⚙️ تخصيص رتبة للقسم').setDescription('اختر القسم:').setColor(0xE8B923)],
@@ -309,13 +309,8 @@ client.on('interactionCreate', async (interaction) => {
             if (closeCfg.channelOwners) delete closeCfg.channelOwners[channel.id];
             saveGuildConfig(guildId, closeCfg);
 
-            const closeBannerPath = getBannerPath(closeChannelCat);
-            const closeBannerFile = closeChannelCat ? categoryBanners[closeChannelCat] : null;
             const closeEmbed = new EmbedBuilder().setTitle('🔒 تم إغلاق التذكرة').setDescription('سيتم حذف هذه القناة خلال 5 ثواني.').setColor(0xED4245).setTimestamp();
-            if (closeBannerPath) closeEmbed.setImage('attachment://' + closeBannerFile);
-            const closePayload = { embeds: [closeEmbed] };
-            if (closeBannerPath) closePayload.files = [new AttachmentBuilder(closeBannerPath, { name: closeBannerFile })];
-            await interaction.editReply(closePayload);
+            await interaction.editReply({ embeds: [closeEmbed] });
             setTimeout(async () => { await channel.delete().catch(() => null); }, 5000);
             return;
         }
@@ -459,10 +454,6 @@ client.on('interactionCreate', async (interaction) => {
 
             const channel = await guild.channels.create({ name: channelName, type: ChannelType.GuildText, permissionOverwrites });
 
-            // بنر القسم المختار
-            const bannerPath = getBannerPath(selectedValue);
-            const bannerFile = categoryBanners[selectedValue] || null;
-
             const ticketEmbed = new EmbedBuilder()
                 .setTitle((categoryEmojis[selectedValue] || '🎫') + ' تذكرة #' + ticketNumber)
                 .addFields(
@@ -473,10 +464,6 @@ client.on('interactionCreate', async (interaction) => {
                 .setDescription('أهلاً بك في **Sulibra**! يرجى شرح طلبك وسيتولى أحد الإدارة مساعدتك قريباً.')
                 .setColor(0xE8B923)
                 .setTimestamp();
-
-            if (bannerPath && bannerFile) {
-                ticketEmbed.setImage('attachment://' + bannerFile);
-            }
 
             const claimButton = new ButtonBuilder()
                 .setCustomId('claim-ticket:' + ticketNumber + ':' + member.id)
@@ -494,9 +481,6 @@ client.on('interactionCreate', async (interaction) => {
             if (activeRoleId) pings.push('<@&' + activeRoleId + '>');
 
             const openMsgPayload = { content: pings.join(' '), embeds: [ticketEmbed], components: [new ActionRowBuilder().addComponents(claimButton, closeButton)] };
-            if (bannerPath && bannerFile) {
-                openMsgPayload.files = [new AttachmentBuilder(bannerPath, { name: bannerFile })];
-            }
             await channel.send(openMsgPayload);
 
             const openCfg = loadGuildConfig(guildId);
@@ -590,18 +574,11 @@ client.on('interactionCreate', async (interaction) => {
 
             await channel.permissionOverwrites.set(claimOverwrites);
 
-            // بنر الاستلام
-            const claimBannerPath = getBannerPath(channelCat);
-            const claimBannerFile = channelCat ? categoryBanners[channelCat] : null;
-
             const claimEmbed = new EmbedBuilder()
                 .setDescription('👤 تم الاستلام بواسطة <@' + claimant.id + '>.\nسيتولى طلبك.')
                 .setColor(0xE8B923)
                 .setTimestamp();
-            if (claimBannerPath && claimBannerFile) claimEmbed.setImage('attachment://' + claimBannerFile);
-
             const claimReplyPayload = { embeds: [claimEmbed] };
-            if (claimBannerPath && claimBannerFile) claimReplyPayload.files = [new AttachmentBuilder(claimBannerPath, { name: claimBannerFile })];
             await interaction.reply(claimReplyPayload);
         } catch (err) { console.error('Claim error:', err.message); }
         return;
@@ -649,18 +626,12 @@ client.on('interactionCreate', async (interaction) => {
         if (closeCfg.channelOwners) delete closeCfg.channelOwners[channel.id];
         saveGuildConfig(guildId, closeCfg);
 
-        const closeBannerPath = getBannerPath(closeChannelCat);
-        const closeBannerFile = closeChannelCat ? categoryBanners[closeChannelCat] : null;
-
         const closeEmbed = new EmbedBuilder()
             .setTitle('🔒 تم إغلاق التذكرة')
             .setDescription('سيتم حذف هذه القناة خلال 5 ثواني.')
             .setColor(0xED4245)
             .setTimestamp();
-        if (closeBannerPath && closeBannerFile) closeEmbed.setImage('attachment://' + closeBannerFile);
-
         const closeReplyPayload = { embeds: [closeEmbed] };
-        if (closeBannerPath && closeBannerFile) closeReplyPayload.files = [new AttachmentBuilder(closeBannerPath, { name: closeBannerFile })];
         await interaction.editReply(closeReplyPayload);
 
         setTimeout(async () => { await channel.delete('أُغلقت بواسطة ' + closer.user.tag).catch(() => null); }, 5000);
