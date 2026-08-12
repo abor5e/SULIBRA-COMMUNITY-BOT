@@ -378,6 +378,17 @@ client.on('interactionCreate', async (interaction) => {
             };
             saveGuildConfig(guildId, closeCfg);
 
+            if (isAdmin) {
+                const adminCloseEmbed = new EmbedBuilder()
+                    .setTitle('🔒 تم إغلاق التذكرة')
+                    .setDescription('تم إغلاق التذكرة بواسطة الإدارة.')
+                    .setColor(0xED4245)
+                    .setTimestamp();
+                await interaction.editReply({ embeds: [adminCloseEmbed] });
+                setTimeout(() => finalizeTicketClosure(channel.guild, channel, guildId, closeCfg.pendingClosures[channel.id]), 3000);
+                return;
+            }
+
             const ratingEmbed = new EmbedBuilder()
                 .setTitle('⭐ قيّم تجربتك')
                 .setDescription('اختر عدد النجوم، وبعدها اكتب سبب التقييم في النموذج الذي سيظهر لك.')
@@ -799,6 +810,17 @@ client.on('interactionCreate', async (interaction) => {
             startedAt: Date.now()
         };
         saveGuildConfig(guildId, closeCfg);
+
+        if (isAdmin) {
+            const adminCloseEmbed = new EmbedBuilder()
+                .setTitle('🔒 تم إغلاق التذكرة')
+                .setDescription('تم إغلاق التذكرة بواسطة الإدارة.')
+                .setColor(0xED4245)
+                .setTimestamp();
+            await interaction.editReply({ embeds: [adminCloseEmbed] });
+            setTimeout(() => finalizeTicketClosure(channel.guild, channel, guildId, closeCfg.pendingClosures[channel.id]), 3000);
+            return;
+        }
 
         const ratingEmbed = new EmbedBuilder()
             .setTitle('⭐ قيّم تجربتك')
