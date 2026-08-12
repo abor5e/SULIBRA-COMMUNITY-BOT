@@ -73,9 +73,11 @@ function incrementGuildTicket(guildId) {
 
 // ─── بنرات الأقسام ────────────────────────────────────────────────────────────
 const categoryBanners = {
-    'management': 'sulibra-banner.png',
-    'technical':  'sulibra-banner.png',
-    'inquiry':    'sulibra-banner.png'
+    'technical':     'sulibra-banner.png',
+    'report-admin':  'sulibra-banner.png',
+    'report-member': 'sulibra-banner.png',
+    'purchase':      'sulibra-banner.png',
+    'inquiry':       'sulibra-banner.png'
 };
 
 function getBannerPath(category) {
@@ -242,9 +244,11 @@ client.on('interactionCreate', async (interaction) => {
                 .setCustomId('ticket-menu')
                 .setPlaceholder('اختر نوع طلبك...')
                 .addOptions([
-                    { label: 'الدعم الفني', value: 'technical', emoji: '🎧' },
-                    { label: 'استفسار', value: 'inquiry', emoji: '💬' },
-                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
+                    { label: 'الـدعـم الـفـنـي 〡🎫', value: 'technical' },
+                    { label: 'بـلاغ عـن اداري 〡🏛️', value: 'report-admin' },
+                    { label: 'بـلاغ عـن عـضـو〡🏛️', value: 'report-member' },
+                    { label: 'شـراء〡💸', value: 'purchase' },
+                    { label: 'اسـتـفسـار〡📝', value: 'inquiry' },
                 ]);
 
             const row = new ActionRowBuilder().addComponents(menu);
@@ -297,9 +301,11 @@ client.on('interactionCreate', async (interaction) => {
                 .setCustomId('setup-category-select')
                 .setPlaceholder('اختر قسماً...')
                 .addOptions([
-                    { label: 'الدعم الفني', value: 'technical', emoji: '🎧' },
-                    { label: 'استفسار', value: 'inquiry', emoji: '💬' },
-                    { label: 'دعم إدارة عليا', value: 'management', emoji: '🛡️' },
+                    { label: 'الـدعـم الـفـنـي 〡🎫', value: 'technical' },
+                    { label: 'بـلاغ عـن اداري 〡🏛️', value: 'report-admin' },
+                    { label: 'بـلاغ عـن عـضـو〡🏛️', value: 'report-member' },
+                    { label: 'شـراء〡💸', value: 'purchase' },
+                    { label: 'اسـتـفسـار〡📝', value: 'inquiry' },
                 ]);
             await interaction.reply({
                 embeds: [new EmbedBuilder().setTitle('⚙️ تخصيص رتبة للقسم').setDescription('اختر القسم:').setColor(0xE8B923)],
@@ -497,15 +503,19 @@ client.on('interactionCreate', async (interaction) => {
             const selectedValue = interaction.values[0];
 
             const categoryLabels = {
-                'management': 'دعم إدارة عليا',
-                'technical':  'الدعم الفني',
-                'inquiry':    'استفسار'
+                'technical':     'الـدعـم الـفـنـي 〡🎫',
+                'report-admin':  'بـلاغ عـن اداري 〡🏛️',
+                'report-member': 'بـلاغ عـن عـضـو〡🏛️',
+                'purchase':      'شـراء〡💸',
+                'inquiry':       'اسـتـفسـار〡📝'
             };
 
             const categoryEmojis = {
-                'management': '🛡️',
-                'technical':  '🎧',
-                'inquiry':    '💬'
+                'technical':     '🎫',
+                'report-admin':  '🏛️',
+                'report-member': '🏛️',
+                'purchase':      '💸',
+                'inquiry':       '📝'
             };
 
             const channelName = 'ticket-' + ticketNumber;
@@ -576,7 +586,13 @@ client.on('interactionCreate', async (interaction) => {
     // ─── setup-category: الخطوة 1 ─────────────────────────────────────────────
     if (interaction.isStringSelectMenu() && interaction.customId === 'setup-category-select') {
         const selectedCat = interaction.values[0];
-        const categoryLabels = { 'management': 'دعم إدارة عليا', 'technical': 'الدعم الفني', 'inquiry': 'استفسار' };
+        const categoryLabels = {
+            'technical': 'الـدعـم الـفـنـي 〡🎫',
+            'report-admin': 'بـلاغ عـن اداري 〡🏛️',
+            'report-member': 'بـلاغ عـن عـضـو〡🏛️',
+            'purchase': 'شـراء〡💸',
+            'inquiry': 'اسـتـفسـار〡📝'
+        };
         const roleMenu = new RoleSelectMenuBuilder().setCustomId('setup-category-role:' + selectedCat).setPlaceholder('اختر رتبة...');
         await interaction.update({
             embeds: [new EmbedBuilder().setTitle('⚙️ تخصيص رتبة').setDescription('القسم: **' + categoryLabels[selectedCat] + '**\n\nاختر الرتبة:').setColor(0xE8B923)],
@@ -589,7 +605,13 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isRoleSelectMenu() && interaction.customId.startsWith('setup-category-role:')) {
         const selectedCat = interaction.customId.split(':')[1];
         const selectedRole = interaction.roles.first();
-        const categoryLabels = { 'management': 'دعم إدارة عليا', 'technical': 'الدعم الفني', 'inquiry': 'استفسار' };
+        const categoryLabels = {
+            'technical': 'الـدعـم الـفـنـي 〡🎫',
+            'report-admin': 'بـلاغ عـن اداري 〡🏛️',
+            'report-member': 'بـلاغ عـن عـضـو〡🏛️',
+            'purchase': 'شـراء〡💸',
+            'inquiry': 'اسـتـفسـار〡📝'
+        };
         const cfg = loadGuildConfig(guildId);
         if (!cfg.categoryRoles) cfg.categoryRoles = {};
         cfg.categoryRoles[selectedCat] = selectedRole.id;
