@@ -36,7 +36,7 @@ const configsDir = path.join(__dirname, 'configs');
 if (!fs.existsSync(configsDir)) fs.mkdirSync(configsDir, { recursive: true });
 
 function defaultGuildConfig() {
-    return { logsChannelId: null, staffRoleId: null, categoryRoles: {}, channelCategories: {}, channelOwners: {}, ticketCount: 0, totalTickets: 0, closedCount: 0, claims: {}, channelClaimants: {}, pendingClosures: {}, ticketRatings: {} };
+    return { logsChannelId: null, ratingsChannelId: null, staffRoleId: null, categoryRoles: {}, channelCategories: {}, channelOwners: {}, ticketCount: 0, totalTickets: 0, closedCount: 0, claims: {}, channelClaimants: {}, pendingClosures: {}, ticketRatings: {} };
 }
 
 function loadGuildConfig(guildId) {
@@ -138,6 +138,36 @@ async function finalizeTicketClosure(guild, channel, guildId, closure) {
         }
     }
 
+    if (rating && cfg.ratingsChannelId) {
+        const ratingsChannel = guild.channels.cache.get(cfg.ratingsChannelId);
+        if (ratingsChannel) {
+            const evaluator = await guild.members.fetch(rating.ownerId).catch(() => null);
+            const avatarUrl = evaluator ? evaluator.user.displayAvatarURL({ size: 256 }) : null;
+            const ratingValue = '⭐'.repeat(rating.stars) + ' (' + rating.stars + '/5)';
+            const reasonValue = rating.reason ? rating.reason.slice(0, 1024) : 'لم يكتب سبباً';
+            const ratingEmbed = new EmbedBuilder()
+                .setTitle('⭐ تقييم جديد')
+                .setDescription('تم تقييم التذكرة بواسطة <@' + rating.ownerId + '>.')
+                .addFields(
+                    { name: '👤 المقيم', value: '<@' + rating.ownerId + '>', inline: true },
+                    { name: '⭐ التقييم', value: ratingValue, inline: true },
+                    { name: '🎫 رقم التذكرة', value: '#' + closure.ticketNumber, inline: true },
+                    { name: '📝 السبب', value: reasonValue }
+                )
+                .setColor(0xE8B923)
+                .setTimestamp();
+            if (avatarUrl) {
+                ratingEmbed.setThumbnail(avatarUrl).setAuthor({
+                    name: evaluator.user.tag,
+                    iconURL: avatarUrl
+                });
+            }
+            await ratingsChannel.send({ embeds: [ratingEmbed] }).catch(err => console.error('Ratings channel error:', err.message));
+        } else {
+            console.error('Ratings channel not found:', cfg.ratingsChannelId);
+        }
+    }
+
     cfg.closedCount = (cfg.closedCount || 0) + 1;
     if (cfg.channelClaimants) delete cfg.channelClaimants[channel.id];
     if (cfg.channelOwners) delete cfg.channelOwners[channel.id];
@@ -160,6 +190,14 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addChannelOption(opt =>
             opt.setName('channel').setDescription('القناة المستهدفة').addChannelTypes(ChannelType.GuildText).setRequired(false)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('setup-ratings')
+        .setDescription('تحديد قناة إرسال تقييمات التذاكر')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(opt =>
+            opt.setName('channel').setDescription('قناة التقييمات').addChannelTypes(ChannelType.GuildText).setRequired(false)
         ),
 
     new SlashCommandBuilder()
@@ -282,6 +320,16 @@ client.on('interactionCreate', async (interaction) => {
             cfg.logsChannelId = targetChannel.id;
             saveGuildConfig(guildId, cfg);
             await interaction.reply({ embeds: [new EmbedBuilder().setDescription('✅ تم تعيين <#' + targetChannel.id + '> كقناة سجلات.').setColor(0x57F287)], flags: 64 });
+            return;
+        }
+
+        // ── /setup-ratings ────────────────────────────────────────────────────
+        if (commandName === 'setup-ratings') {
+            const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
+            const cfg = loadGuildConfig(guildId);
+            cfg.ratingsChannelId = targetChannel.id;
+            saveGuildConfig(guildId, cfg);
+            await interaction.reply({ embeds: [new EmbedBuilder().setDescription('✅ تم تعيين <#' + targetChannel.id + '> كقناة للتقييمات.').setColor(0x57F287)], flags: 64 });
             return;
         }
 
@@ -464,6 +512,7 @@ client.on('interactionCreate', async (interaction) => {
                 embeds: [new EmbedBuilder().setTitle('📋 أوامر الإدارة — Sulibra').addFields(
                     { name: '`/ticket`', value: 'إرسال لوحة التذاكر' },
                     { name: '`/setup-logs`', value: 'تحديد قناة السجلات' },
+                    { name: '`/setup-ratings`', value: 'تحديد قناة التقييمات' },
                     { name: '`/setup-staff`', value: 'تحديد رتبة الإدارة العامة' },
                     { name: '`/setup-category`', value: 'تخصيص رتبة لكل قسم' },
                     { name: '`/close-ticket`', value: 'إغلاق التذكرة وحفظ السجل' },
