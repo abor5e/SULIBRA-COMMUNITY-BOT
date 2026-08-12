@@ -12,7 +12,10 @@ const {
     REST,
     Routes,
     SlashCommandBuilder,
-    AttachmentBuilder
+    AttachmentBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require('discord.js');
 const transcripts = require('discord-html-transcripts');
 const express = require('express');
@@ -33,7 +36,7 @@ const configsDir = path.join(__dirname, 'configs');
 if (!fs.existsSync(configsDir)) fs.mkdirSync(configsDir, { recursive: true });
 
 function defaultGuildConfig() {
-    return { logsChannelId: null, staffRoleId: null, categoryRoles: {}, channelCategories: {}, channelOwners: {}, ticketCount: 0, totalTickets: 0, closedCount: 0, claims: {}, channelClaimants: {} };
+    return { logsChannelId: null, staffRoleId: null, categoryRoles: {}, channelCategories: {}, channelOwners: {}, ticketCount: 0, totalTickets: 0, closedCount: 0, claims: {}, channelClaimants: {}, pendingClosures: {}, ticketRatings: {} };
 }
 
 function loadGuildConfig(guildId) {
@@ -83,6 +86,64 @@ function getBannerPath(category) {
         path.join(process.cwd(), 'assets', fileName)
     ];
     return candidates.find(p => fs.existsSync(p)) || null;
+}
+
+function ratingComponents(ticketNumber, ownerId) {
+    return [
+        new ActionRowBuilder().addComponents(
+            [1, 2, 3, 4, 5].map(stars =>
+                new ButtonBuilder()
+                    .setCustomId('ticket-rating:' + ticketNumber + ':' + ownerId + ':' + stars)
+                    .setLabel(String(stars))
+                    .setEmoji('⭐')
+                    .setStyle(stars >= 4 ? ButtonStyle.Success : stars === 3 ? ButtonStyle.Secondary : ButtonStyle.Danger)
+            )
+        )
+    ];
+}
+
+async function finalizeTicketClosure(guild, channel, guildId, closure) {
+    const cfg = loadGuildConfig(guildId);
+    const pending = cfg.pendingClosures && cfg.pendingClosures[channel.id];
+    if (!pending || pending.finalized) return;
+
+    pending.finalized = true;
+    const rating = cfg.ticketRatings && cfg.ticketRatings[channel.id];
+    const transcript = await buildTranscript(channel, closure.ticketNumber).catch(() => null);
+
+    if (cfg.logsChannelId) {
+        const logsChannel = guild.channels.cache.get(cfg.logsChannelId);
+        if (logsChannel) {
+            const ratingValue = rating
+                ? '⭐'.repeat(rating.stars) + ' (' + rating.stars + '/5)'
+                : 'لم يتم التقييم';
+            const reasonValue = rating && rating.reason ? rating.reason.slice(0, 1024) : 'لم يكتب سبباً';
+            const logPayload = {
+                embeds: [new EmbedBuilder()
+                    .setTitle('📋 سجل التذكرة #' + closure.ticketNumber)
+                    .addFields(
+                        { name: '👤 الصاحب', value: closure.ownerId ? '<@' + closure.ownerId + '>' : 'غير معروف', inline: true },
+                        { name: '🔒 أُغلقت بواسطة', value: '<@' + closure.closerId + '>', inline: true },
+                        { name: '📁 القناة', value: channel.name, inline: true },
+                        { name: '⭐ التقييم', value: ratingValue, inline: true },
+                        { name: '📝 السبب', value: reasonValue }
+                    )
+                    .setColor(0xED4245)
+                    .setTimestamp()]
+            };
+            if (transcript) logPayload.files = [transcript];
+            await logsChannel.send(logPayload).catch(err => console.error('Rating log error:', err.message));
+        }
+    }
+
+    cfg.closedCount = (cfg.closedCount || 0) + 1;
+    if (cfg.channelClaimants) delete cfg.channelClaimants[channel.id];
+    if (cfg.channelOwners) delete cfg.channelOwners[channel.id];
+    delete cfg.pendingClosures[channel.id];
+    delete cfg.ticketRatings[channel.id];
+    saveGuildConfig(guildId, cfg);
+
+    await channel.delete('أُغلقت بواسطة ' + (closure.closerTag || 'الإدارة')).catch(() => null);
 }
 
 const commands = [
@@ -294,24 +355,36 @@ client.on('interactionCreate', async (interaction) => {
             const channelName = channel.name;
             const ticketNum = channelName.replace(/[^0-9]/g, '') || '?';
             const ownerId = cfg.channelOwners && cfg.channelOwners[channel.id];
-            const closeChannelCat = cfg.channelCategories && cfg.channelCategories[channel.id];
-            try { await interaction.deferReply(); } catch { return; }
-            const transcript = await buildTranscript(channel, ticketNum);
-            if (cfg.logsChannelId) {
-                const logsChannel = channel.guild.channels.cache.get(cfg.logsChannelId);
-                if (logsChannel) {
-                    await logsChannel.send({ embeds: [new EmbedBuilder().setTitle('📋 سجل التذكرة #' + ticketNum).addFields({ name: '👤 الصاحب', value: ownerId ? '<@' + ownerId + '>' : 'غير معروف', inline: true }, { name: '🔒 أُغلقت بواسطة', value: '<@' + closer.id + '>', inline: true }, { name: '📁 القناة', value: channelName, inline: true }).setColor(0xED4245).setTimestamp()], files: [transcript] });
-                }
+            if (cfg.pendingClosures && cfg.pendingClosures[channel.id]) {
+                await interaction.reply({ content: '⏳ تم طلب التقييم مسبقاً لهذه التذكرة.', flags: 64 });
+                return;
             }
+            try { await interaction.deferReply(); } catch { return; }
+
             const closeCfg = loadGuildConfig(guildId);
-            closeCfg.closedCount = (closeCfg.closedCount || 0) + 1;
-            if (closeCfg.channelClaimants) delete closeCfg.channelClaimants[channel.id];
-            if (closeCfg.channelOwners) delete closeCfg.channelOwners[channel.id];
+            if (!closeCfg.pendingClosures) closeCfg.pendingClosures = {};
+            closeCfg.pendingClosures[channel.id] = {
+                ticketNumber: ticketNum,
+                ownerId,
+                closerId: closer.id,
+                closerTag: closer.user.tag,
+                startedAt: Date.now()
+            };
             saveGuildConfig(guildId, closeCfg);
 
-            const closeEmbed = new EmbedBuilder().setTitle('🔒 تم إغلاق التذكرة').setDescription('سيتم حذف هذه القناة خلال 5 ثواني.').setColor(0xED4245).setTimestamp();
-            await interaction.editReply({ embeds: [closeEmbed] });
-            setTimeout(async () => { await channel.delete().catch(() => null); }, 5000);
+            const ratingEmbed = new EmbedBuilder()
+                .setTitle('⭐ قيّم تجربتك')
+                .setDescription('اختر عدد النجوم، وبعدها اكتب سبب التقييم في النموذج الذي سيظهر لك.')
+                .setColor(0xE8B923)
+                .setTimestamp();
+            const ratingMessage = await interaction.editReply({
+                content: ownerId ? '<@' + ownerId + '>' : null,
+                embeds: [ratingEmbed],
+                components: ratingComponents(ticketNum, ownerId)
+            });
+            closeCfg.pendingClosures[channel.id].ratingMessageId = ratingMessage.id;
+            saveGuildConfig(guildId, closeCfg);
+            setTimeout(() => finalizeTicketClosure(channel.guild, channel, guildId, closeCfg.pendingClosures[channel.id] || {}), 60000);
             return;
         }
 
@@ -528,6 +601,67 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
+    // ─── تقييم التذكرة: اختيار النجوم ──────────────────────────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('ticket-rating:')) {
+        const parts = interaction.customId.split(':');
+        const ticketNumber = parts[1];
+        const ownerId = parts[2];
+        const stars = Number(parts[3]);
+        const channel = interaction.channel;
+        const cfg = loadGuildConfig(guildId);
+        const pending = cfg.pendingClosures && cfg.pendingClosures[channel.id];
+
+        if (!pending || pending.ownerId !== interaction.user.id || ownerId !== interaction.user.id) {
+            await interaction.reply({ content: '❌ التقييم متاح لصاحب التذكرة فقط.', flags: 64 });
+            return;
+        }
+
+        if (!cfg.ticketRatings) cfg.ticketRatings = {};
+        cfg.ticketRatings[channel.id] = {
+            stars,
+            ownerId: interaction.user.id,
+            ratedAt: Date.now()
+        };
+        saveGuildConfig(guildId, cfg);
+
+        const modal = new ModalBuilder()
+            .setCustomId('ticket-rating-reason:' + channel.id + ':' + ticketNumber)
+            .setTitle('سبب التقييم');
+        const reasonInput = new TextInputBuilder()
+            .setCustomId('reason')
+            .setLabel('السبب:')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('اكتب سبب تقييمك...')
+            .setRequired(false)
+            .setMaxLength(1000);
+        modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+        await interaction.showModal(modal);
+        return;
+    }
+
+    // ─── تقييم التذكرة: حفظ السبب ──────────────────────────────────────────────
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket-rating-reason:')) {
+        const parts = interaction.customId.split(':');
+        const channelId = parts[1];
+        const channel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
+        const cfg = loadGuildConfig(guildId);
+        const pending = cfg.pendingClosures && cfg.pendingClosures[channelId];
+        const rating = cfg.ticketRatings && cfg.ticketRatings[channelId];
+
+        if (!pending || pending.ownerId !== interaction.user.id || !rating) {
+            await interaction.reply({ content: '❌ انتهت صلاحية نموذج التقييم.', flags: 64 });
+            return;
+        }
+
+        rating.reason = interaction.fields.getTextInputValue('reason').trim() || 'لم يكتب سبباً';
+        rating.submittedAt = Date.now();
+        saveGuildConfig(guildId, cfg);
+
+        await interaction.reply({ content: '✅ تم تسجيل تقييمك، شكراً لك.', flags: 64 });
+        setTimeout(() => finalizeTicketClosure(interaction.guild, channel, guildId, pending), 3000);
+        return;
+    }
+
     // ─── زر الاستلام ────────────────────────────────────────────────────────────
     if (interaction.isButton() && interaction.customId.startsWith('claim-ticket:')) {
         const parts = interaction.customId.split(':');
@@ -624,32 +758,39 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
-        try { await interaction.deferReply(); } catch { return; }
-
-        const transcript = await buildTranscript(channel, ticketNumber);
-
-        if (cfg.logsChannelId) {
-            const logsChannel = channel.guild.channels.cache.get(cfg.logsChannelId);
-            if (logsChannel) {
-                await logsChannel.send({ embeds: [new EmbedBuilder().setTitle('📋 سجل التذكرة #' + ticketNumber).addFields({ name: '👤 الصاحب', value: ownerId ? '<@' + ownerId + '>' : 'غير معروف', inline: true }, { name: '🔒 أُغلقت بواسطة', value: '<@' + closer.id + '>', inline: true }, { name: '📁 القناة', value: channel.name, inline: true }).setColor(0xED4245).setTimestamp()], files: [transcript] });
-            }
+        if (cfg.pendingClosures && cfg.pendingClosures[channel.id]) {
+            try { await interaction.reply({ content: '⏳ تم طلب التقييم مسبقاً لهذه التذكرة.', flags: 64 }); } catch {}
+            return;
         }
 
+        try { await interaction.deferReply(); } catch { return; }
+
+        await interaction.message.edit({ components: [] }).catch(() => null);
+
         const closeCfg = loadGuildConfig(guildId);
-        closeCfg.closedCount = (closeCfg.closedCount || 0) + 1;
-        if (closeCfg.channelClaimants) delete closeCfg.channelClaimants[channel.id];
-        if (closeCfg.channelOwners) delete closeCfg.channelOwners[channel.id];
+        if (!closeCfg.pendingClosures) closeCfg.pendingClosures = {};
+        closeCfg.pendingClosures[channel.id] = {
+            ticketNumber,
+            ownerId,
+            closerId: closer.id,
+            closerTag: closer.user.tag,
+            startedAt: Date.now()
+        };
         saveGuildConfig(guildId, closeCfg);
 
-        const closeEmbed = new EmbedBuilder()
-            .setTitle('🔒 تم إغلاق التذكرة')
-            .setDescription('سيتم حذف هذه القناة خلال 5 ثواني.')
-            .setColor(0xED4245)
+        const ratingEmbed = new EmbedBuilder()
+            .setTitle('⭐ قيّم تجربتك')
+            .setDescription('اختر عدد النجوم، وبعدها اكتب سبب التقييم في النموذج الذي سيظهر لك.')
+            .setColor(0xE8B923)
             .setTimestamp();
-        const closeReplyPayload = { embeds: [closeEmbed] };
-        await interaction.editReply(closeReplyPayload);
-
-        setTimeout(async () => { await channel.delete('أُغلقت بواسطة ' + closer.user.tag).catch(() => null); }, 5000);
+        const ratingMessage = await interaction.editReply({
+            content: ownerId ? '<@' + ownerId + '>' : null,
+            embeds: [ratingEmbed],
+            components: ratingComponents(ticketNumber, ownerId)
+        });
+        closeCfg.pendingClosures[channel.id].ratingMessageId = ratingMessage.id;
+        saveGuildConfig(guildId, closeCfg);
+        setTimeout(() => finalizeTicketClosure(channel.guild, channel, guildId, closeCfg.pendingClosures[channel.id] || {}), 60000);
         return;
     }
 });
